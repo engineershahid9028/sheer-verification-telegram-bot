@@ -1,9 +1,11 @@
 fastapi
 uvicorn
-python-telegram-bot
+redis
 sqlalchemy
 psycopg2-binary
-redis
-celery
 requests
-python-dotenv
+httpx
+fake-useragent
+tls-client
+playwright
+undetected-chromedriver
