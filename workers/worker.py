@@ -3,25 +3,51 @@ import json
 import redis
 import subprocess
 import time
+import signal
+
+# ================= CONFIG =================
 
 REDIS_URL = os.getenv("REDIS_URL")
+
+if not REDIS_URL:
+    raise RuntimeError("❌ REDIS_URL is not set")
+
 r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
 print("✅ Worker connected to Redis")
 
+# ================= UTILS =================
+
+def update_job(job_id, **fields):
+    r.hset(job_id, mapping=fields)
+
+
+def fail_job(job_id, error):
+    update_job(job_id,
+        status="failed",
+        progress=0,
+        output=str(error)
+    )
+
+
+# ================= WORKER LOOP =================
+
 while True:
-    _, raw = r.brpop("job_queue")
-    job = json.loads(raw)
-
-    job_id = job["job_id"]
-    tool = job["tool"]
-    args = job["args"]
-
-    print(f"▶ Running job {job_id} using {tool}")
-
-    r.hset(job_id, mapping={"status": "running", "progress": 20})
-
     try:
+        print("⏳ Waiting for job...")
+        _, raw = r.brpop("job_queue")
+        job = json.loads(raw)
+
+        job_id = job["job_id"]
+        tool = job["tool"]
+        args = job["args"]
+
+        print(f"▶ Running job {job_id} using {tool}")
+
+        update_job(job_id, status="running", progress=10)
+
+        # ================= RUN TOOL =================
+
         cmd = ["python", f"tools/multi-tools/{tool}/main.py"] + args.split()
 
         process = subprocess.Popen(
@@ -31,35 +57,30 @@ while True:
             text=True
         )
 
-        # Give tool up to 5 minutes
-        start = time.time()
-        timeout = 300
+        # Progress simulation
+        time.sleep(3)
+        update_job(job_id, progress=30)
 
-        while True:
-            if process.poll() is not None:
-                break
+        time.sleep(3)
+        update_job(job_id, progress=60)
 
-            if time.time() - start > timeout:
-                process.kill()
-                raise Exception("Tool execution timeout (300s)")
+        try:
+            out, err = process.communicate(timeout=600)  # 10 minutes max
+        except subprocess.TimeoutExpired:
+            process.kill()
+            fail_job(job_id, "Execution timeout (10 minutes)")
+            continue
 
-            time.sleep(2)
+        output = (out or "") + (err or "")
 
-        out, err = process.communicate()
-
-        r.hset(job_id, mapping={
-            "status": "done",
-            "progress": 100,
-            "output": (out + err)
-        })
+        update_job(job_id,
+            status="done",
+            progress=100,
+            output=output
+        )
 
         print(f"✅ Job {job_id} completed")
 
     except Exception as e:
         print("❌ Worker error:", e)
-
-        r.hset(job_id, mapping={
-            "status": "failed",
-            "progress": 0,
-            "output": str(e)
-        })
+        time.sleep(5)
