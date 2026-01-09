@@ -42,14 +42,13 @@ def balance(user_id: int):
     return {"credits": user.credits}
 
 # ---------------- RUN TOOL ----------------
-
 @app.post("/run")
 def run_tool(user_id: int, tool: str, args: str):
-    db: Session = SessionLocal()
+    db = SessionLocal()
 
     user = get_or_create_user(user_id)
-
     tool_obj = db.query(Tool).filter(Tool.name == tool).first()
+
     if not tool_obj:
         raise HTTPException(404, "Tool not found")
 
@@ -60,9 +59,8 @@ def run_tool(user_id: int, tool: str, args: str):
     user.credits -= tool_obj.price
     db.commit()
 
-    # enqueue job
+    # enqueue job (do NOT wait for worker)
     job_id = enqueue_job(user_id, tool, args)
-    queue_pos = get_queue_position(job_id)
 
     job = Job(
         id=job_id,
@@ -77,7 +75,7 @@ def run_tool(user_id: int, tool: str, args: str):
 
     return {
         "job_id": job_id,
-        "queue_position": queue_pos,
+        "status": "queued",
         "remaining_credits": user.credits
     }
 
