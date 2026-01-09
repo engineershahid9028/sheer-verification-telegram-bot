@@ -53,56 +53,51 @@ def balance(user_id: int):
     return {"credits": user["credits"]}
 
 # ---------------- RUN TOOL ----------------
-
 @app.post("/run")
 def run_tool(user_id: int, tool: str, args: str):
-    db: Session = SessionLocal()
+    try:
+        db = SessionLocal()
 
-    # get or create user (ORM version for write)
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        user = User(id=user_id, credits=1.0)
-        db.add(user)
+        user = get_or_create_user(user_id)
+
+        tool_obj = db.query(Tool).filter(Tool.name == tool).first()
+        if not tool_obj:
+            raise HTTPException(status_code=404, detail=f"Tool not found: {tool}")
+
+        if user.credits < tool_obj.price:
+            raise HTTPException(status_code=402, detail="Not enough credits")
+
+        # deduct credits
+        user.credits -= tool_obj.price
         db.commit()
-        db.refresh(user)
 
-    # get tool
-    tool_obj = db.query(Tool).filter(Tool.name == tool).first()
-    if not tool_obj:
+        # enqueue job
+        job_id = enqueue_job(user_id, tool, args)
+
+        # save job
+        job = Job(
+            id=job_id,
+            user_id=user_id,
+            tool=tool,
+            status="queued",
+            output=""
+        )
+        db.add(job)
+        db.commit()
         db.close()
-        raise HTTPException(status_code=404, detail="Tool not found")
 
-    # check credits
-    if user.credits < tool_obj.price:
-        db.close()
-        raise HTTPException(status_code=402, detail="Not enough credits")
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "remaining_credits": user.credits
+        }
 
-    # deduct credits
-    user.credits -= tool_obj.price
-    db.commit()
+    except HTTPException:
+        raise
 
-    # enqueue job
-    job_id = enqueue_job(user_id, tool, args)
-
-    # store job
-    job = Job(
-        id=job_id,
-        user_id=user_id,
-        tool=tool,
-        status="queued",
-        output=""
-    )
-    db.add(job)
-    db.commit()
-
-    remaining = user.credits
-    db.close()
-
-    return {
-        "job_id": job_id,
-        "status": "queued",
-        "remaining_credits": remaining
-    }
+    except Exception as e:
+        print("❌ RUN ERROR:", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ---------------- JOB STATUS ----------------
 
