@@ -36,8 +36,33 @@ def startup():
     try:
         init_db()
         print("✅ Database initialized")
+
+        db = SessionLocal()
+
+        # Auto-register tools
+        tools = [
+            "spotify-verify-tool",
+            "youtube-verify-tool",
+            "k12-verify-tool",
+            "veterans-verify-tool",
+            "canva-teacher-tool",
+            "perplexity-verify-tool",
+            "one-verify-tool",
+            "boltnew-verify-tool",
+        ]
+
+        for name in tools:
+            if not db.query(Tool).filter(Tool.name == name).first():
+                db.add(Tool(name=name, price=1.0))
+
+        db.commit()
+        db.close()
+
+        print("✅ Tools registered")
+
     except Exception as e:
-        raise RuntimeError(f"❌ Database init failed: {e}")
+        raise RuntimeError(f"❌ Startup failed: {e}")
+
 
 # ---------------- ROOT ----------------
 
