@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.database import init_db, SessionLocal, get_or_create_user
 from backend.models import Tool, Job
-from backend.queue import enqueue_job, get_queue_position
+from backend.queue import enqueue_job
 from backend.dashboard import router as dashboard_router
 
 # ---------------- CONFIG ----------------
@@ -46,22 +46,26 @@ def balance(user_id: int):
 def run_tool(user_id: int, tool: str, args: str):
     db = SessionLocal()
 
+    # get or create user
     user = get_or_create_user(user_id)
+
+    # get tool
     tool_obj = db.query(Tool).filter(Tool.name == tool).first()
-
     if not tool_obj:
-        raise HTTPException(404, "Tool not found")
+        raise HTTPException(status_code=404, detail="Tool not found")
 
+    # check credits
     if user.credits < tool_obj.price:
-        raise HTTPException(402, "Not enough credits")
+        raise HTTPException(status_code=402, detail="Not enough credits")
 
     # deduct credits
     user.credits -= tool_obj.price
     db.commit()
 
-    # enqueue job (do NOT wait for worker)
+    # enqueue job ONLY (do not wait for worker)
     job_id = enqueue_job(user_id, tool, args)
 
+    # store job record
     job = Job(
         id=job_id,
         user_id=user_id,
@@ -73,6 +77,7 @@ def run_tool(user_id: int, tool: str, args: str):
     db.commit()
     db.close()
 
+    # return immediately
     return {
         "job_id": job_id,
         "status": "queued",
