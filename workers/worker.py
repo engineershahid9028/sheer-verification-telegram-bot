@@ -2,80 +2,71 @@ import os
 import json
 import redis
 import subprocess
-import traceback
-import shlex
+import time
 
 REDIS_URL = os.getenv("REDIS_URL")
-r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
-print("✅ Worker connected to Redis")
+def connect_redis():
+    while True:
+        try:
+            r = redis.Redis.from_url(
+                REDIS_URL,
+                decode_responses=True,
+                socket_keepalive=True,
+                socket_timeout=30
+            )
+            r.ping()
+            print("✅ Worker connected to Redis")
+            return r
+        except Exception as e:
+            print("❌ Redis connection failed, retrying in 5s:", e)
+            time.sleep(5)
 
-TOOLS_ROOT = "tools/multi-tools"
+r = connect_redis()
 
 while True:
-    _, raw = r.brpop("job_queue")
-    job = json.loads(raw)
-
-    job_id = job["job_id"]
-    tool = job["tool"]
-    args = job["args"]
-
-    print(f"\n▶ JOB {job_id}")
-    print(f"▶ TOOL: {tool}")
-    print(f"▶ ARGS: {args}")
-
-    r.hset(job_id, mapping={"status": "running", "progress": 30})
-
     try:
-        tool_path = f"{TOOLS_ROOT}/{tool}/main.py"
+        job = r.brpop("job_queue", timeout=30)
 
-        if not os.path.exists(tool_path):
-            raise Exception(f"Tool not found: {tool_path}")
+        if not job:
+            continue  # timeout, loop again
 
-        cmd = ["python", tool_path] + shlex.split(args)
+        _, raw = job
+        job = json.loads(raw)
 
-        print("▶ CMD:", cmd)
+        job_id = job["job_id"]
+        tool = job["tool"]
+        args = job["args"]
+
+        print(f"▶ Running job {job_id} using {tool}")
+
+        r.hset(job_id, mapping={"status": "running", "progress": 30})
 
         process = subprocess.Popen(
-            cmd,
+            ["python", f"tools/multi-tools/{tool}/main.py"] + args.split(),
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
+            stderr=subprocess.PIPE
         )
 
-        out, err = process.communicate(timeout=180)
+        out, err = process.communicate(timeout=300)
 
-        output = ""
-        if out:
-            output += "\n=== STDOUT ===\n" + out
-        if err:
-            output += "\n=== STDERR ===\n" + err
+        r.hset(job_id, mapping={
+            "status": "done",
+            "progress": 100,
+            "output": (out + err).decode(errors="ignore")
+        })
 
-        if process.returncode != 0:
-            print("❌ TOOL FAILED")
-            print(output)
-
-            r.hset(job_id, mapping={
-                "status": "failed",
-                "progress": 0,
-                "output": output or "Tool exited with error"
-            })
-        else:
-            print("✅ TOOL SUCCESS")
-
-            r.hset(job_id, mapping={
-                "status": "done",
-                "progress": 100,
-                "output": output or "Completed successfully"
-            })
-
-    except Exception:
-        error_text = traceback.format_exc()
-        print("🔥 WORKER ERROR")
-        print(error_text)
-
+    except subprocess.TimeoutExpired:
         r.hset(job_id, mapping={
             "status": "failed",
             "progress": 0,
-            "output": error_text
+            "output": "Execution timeout"
         })
+
+    except redis.exceptions.ConnectionError:
+        print("❌ Redis disconnected. Reconnecting...")
+        r = connect_redis()
+
+    except Exception as e:
+        print("❌ Worker error:", e)
+        time.sleep(2)
