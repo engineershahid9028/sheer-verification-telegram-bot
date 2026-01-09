@@ -2,9 +2,32 @@ import os
 import json
 import uuid
 import redis
+import time
 
 REDIS_URL = os.getenv("REDIS_URL")
-r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+
+if not REDIS_URL:
+    raise RuntimeError("❌ REDIS_URL not set for queue")
+
+def connect_redis():
+    while True:
+        try:
+            r = redis.Redis.from_url(
+                REDIS_URL,
+                decode_responses=True,
+                socket_keepalive=True,
+                socket_timeout=30
+            )
+            r.ping()
+            print("✅ Queue connected to Redis")
+            return r
+        except Exception as e:
+            print("❌ Redis connection failed, retrying in 5s:", e)
+            time.sleep(5)
+
+r = connect_redis()
+
+# ---------------- JOB QUEUE ----------------
 
 def enqueue_job(user_id, tool, args):
     job_id = str(uuid.uuid4())[:8]
@@ -20,12 +43,3 @@ def enqueue_job(user_id, tool, args):
 
     r.lpush("job_queue", json.dumps(job))
     return job_id
-
-
-def get_queue_position(job_id):
-    jobs = r.lrange("job_queue", 0, -1)
-    for i, j in enumerate(jobs):
-        data = json.loads(j)
-        if data["job_id"] == job_id:
-            return len(jobs) - i
-    return None
