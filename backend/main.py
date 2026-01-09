@@ -6,27 +6,38 @@ from sqlalchemy.orm import Session
 from backend.database import init_db, SessionLocal, get_or_create_user
 from backend.models import Tool, Job
 from backend.queue import enqueue_job
-from backend.dashboard import router as dashboard_router
 
 # ---------------- CONFIG ----------------
 
 REDIS_URL = os.getenv("REDIS_URL")
-r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not REDIS_URL:
+    raise RuntimeError("❌ REDIS_URL is not set")
+
+if not DATABASE_URL:
+    raise RuntimeError("❌ DATABASE_URL is not set")
+
+try:
+    r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
+    r.ping()
+    print("✅ Redis connected")
+except Exception as e:
+    raise RuntimeError(f"❌ Redis connection failed: {e}")
 
 # ---------------- APP ----------------
 
 app = FastAPI(title="Sheer Verification Backend")
 
-# include dashboard AFTER app is created
-app.include_router(dashboard_router)
-
 # ---------------- STARTUP ----------------
 
 @app.on_event("startup")
 def startup():
-    init_db()
-    print("✅ Database initialized")
-    print("✅ Redis connected")
+    try:
+        init_db()
+        print("✅ Database initialized")
+    except Exception as e:
+        raise RuntimeError(f"❌ Database init failed: {e}")
 
 # ---------------- ROOT ----------------
 
@@ -41,10 +52,11 @@ def balance(user_id: int):
     user = get_or_create_user(user_id)
     return {"credits": user.credits}
 
-# ---------------- RUN TOOL ----------------
+# ---------------- RUN TOOL (ASYNC FIRE & FORGET) ----------------
+
 @app.post("/run")
 def run_tool(user_id: int, tool: str, args: str):
-    db = SessionLocal()
+    db: Session = SessionLocal()
 
     # get or create user
     user = get_or_create_user(user_id)
@@ -62,10 +74,10 @@ def run_tool(user_id: int, tool: str, args: str):
     user.credits -= tool_obj.price
     db.commit()
 
-    # enqueue job ONLY (do not wait for worker)
+    # enqueue job (fire-and-forget)
     job_id = enqueue_job(user_id, tool, args)
 
-    # store job record
+    # store job
     job = Job(
         id=job_id,
         user_id=user_id,
@@ -77,7 +89,6 @@ def run_tool(user_id: int, tool: str, args: str):
     db.commit()
     db.close()
 
-    # return immediately
     return {
         "job_id": job_id,
         "status": "queued",
