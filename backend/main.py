@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-print("🔥 BACKEND MAIN LOADED 🔥")
+print("🔥 BACKEND MAIN LOADED! 🔥")
 
 app = FastAPI()
 
