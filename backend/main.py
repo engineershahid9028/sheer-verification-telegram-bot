@@ -1,3 +1,4 @@
+print("🔥 BACKEND MAIN LOADED 🔥")
 from fastapi import FastAPI
 import traceback
 
