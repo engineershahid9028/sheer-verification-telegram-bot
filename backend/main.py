@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from backend.database import init_db, SessionLocal, get_or_create_user
 from backend.models import Tool, Job
 from backend.queue import enqueue_job, get_queue_position
+from backend.dashboard import router as dashboard_router
+app.include_router(dashboard_router)
 
 REDIS_URL = os.getenv("REDIS_URL")
 r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
