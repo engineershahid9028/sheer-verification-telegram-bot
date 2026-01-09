@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-telegram-bot
+sqlalchemy
+psycopg2-binary
+redis
+celery
+requests
+python-dotenv
