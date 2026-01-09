@@ -7,16 +7,12 @@ from backend.database import init_db, SessionLocal, get_or_create_user
 from backend.models import Tool, Job
 from backend.queue import enqueue_job, get_queue_position
 
-# ---------------- CONFIG ----------------
-
 REDIS_URL = os.getenv("REDIS_URL")
 r = redis.Redis.from_url(REDIS_URL, decode_responses=True)
 
-# ---------------- APP ----------------
-
 app = FastAPI(title="Sheer Verification Backend")
 
-# ---------------- STARTUP ----------------
+# ---------- Startup ----------
 
 @app.on_event("startup")
 def startup():
@@ -24,43 +20,31 @@ def startup():
     print("✅ Database initialized")
     print("✅ Redis connected")
 
-# ---------------- HELPERS ----------------
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# ---------------- API ----------------
+# ---------- Root ----------
 
 @app.get("/")
 def root():
     return {"status": "ok"}
 
-# ---------------- BALANCE ----------------
+# ---------- Balance ----------
 
 @app.get("/balance/{user_id}")
 def balance(user_id: int):
     user = get_or_create_user(user_id)
     return {"credits": user.credits}
 
-# ---------------- RUN TOOL ----------------
+# ---------- Run Tool ----------
 
 @app.post("/run")
 def run_tool(user_id: int, tool: str, args: str):
     db: Session = SessionLocal()
 
-    # get user
     user = get_or_create_user(user_id)
 
-    # get tool pricing
     tool_obj = db.query(Tool).filter(Tool.name == tool).first()
     if not tool_obj:
         raise HTTPException(404, "Tool not found")
 
-    # check credits
     if user.credits < tool_obj.price:
         raise HTTPException(402, "Not enough credits")
 
@@ -72,7 +56,6 @@ def run_tool(user_id: int, tool: str, args: str):
     job_id = enqueue_job(user_id, tool, args)
     queue_pos = get_queue_position(job_id)
 
-    # save job
     job = Job(
         id=job_id,
         user_id=user_id,
@@ -90,14 +73,18 @@ def run_tool(user_id: int, tool: str, args: str):
         "remaining_credits": user.credits
     }
 
-# ---------------- JOB STATUS ----------------
+# ---------- Job Status ----------
 
 @app.get("/status/{job_id}")
 def job_status(job_id: str):
     data = r.hgetall(job_id)
 
     if not data:
-        return {"job_id": job_id, "status": "queued", "progress": 0}
+        return {
+            "job_id": job_id,
+            "status": "queued",
+            "progress": 0
+        }
 
     return {
         "job_id": job_id,
@@ -106,7 +93,7 @@ def job_status(job_id: str):
         "output": data.get("output", "")
     }
 
-# ---------------- USER JOBS ----------------
+# ---------- User Jobs ----------
 
 @app.get("/jobs/{user_id}")
 def user_jobs(user_id: int):
@@ -123,7 +110,7 @@ def user_jobs(user_id: int):
         for j in jobs
     ]
 
-# ---------------- ADMIN: SET TOOL PRICE ----------------
+# ---------- Admin: Set Tool Price ----------
 
 @app.post("/admin/setprice")
 def set_price(tool: str, price: float, key: str):
@@ -146,7 +133,7 @@ def set_price(tool: str, price: float, key: str):
 
     return {"status": "ok", "tool": tool, "price": price}
 
-# ---------------- ADMIN: GRANT CREDITS ----------------
+# ---------- Admin: Grant Credits ----------
 
 @app.post("/admin/grant")
 def grant_credits(user_id: int, credits: float, key: str):
@@ -163,7 +150,7 @@ def grant_credits(user_id: int, credits: float, key: str):
 
     return {"status": "ok", "user_id": user_id, "credits_added": credits}
 
-# ---------------- HEALTH ----------------
+# ---------- Health ----------
 
 @app.get("/health")
 def health():
