@@ -4,7 +4,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy.orm import Session
 
 from backend.database import init_db, SessionLocal, get_or_create_user
-from backend.models import Tool, Job
+from backend.models import Tool, Job, User
 from backend.queue import enqueue_job
 
 # ---------------- CONFIG ----------------
@@ -50,31 +50,38 @@ def root():
 @app.get("/balance/{user_id}")
 def balance(user_id: int):
     user = get_or_create_user(user_id)
-    return {"credits": user.credits}
+    return {"credits": user["credits"]}
 
-# ---------------- RUN TOOL (ASYNC FIRE & FORGET) ----------------
+# ---------------- RUN TOOL ----------------
 
 @app.post("/run")
 def run_tool(user_id: int, tool: str, args: str):
     db: Session = SessionLocal()
 
-    # get or create user
-    user = get_or_create_user(user_id)
+    # get or create user (ORM version for write)
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        user = User(id=user_id, credits=1.0)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
 
     # get tool
     tool_obj = db.query(Tool).filter(Tool.name == tool).first()
     if not tool_obj:
+        db.close()
         raise HTTPException(status_code=404, detail="Tool not found")
 
     # check credits
     if user.credits < tool_obj.price:
+        db.close()
         raise HTTPException(status_code=402, detail="Not enough credits")
 
     # deduct credits
     user.credits -= tool_obj.price
     db.commit()
 
-    # enqueue job (fire-and-forget)
+    # enqueue job
     job_id = enqueue_job(user_id, tool, args)
 
     # store job
@@ -87,12 +94,14 @@ def run_tool(user_id: int, tool: str, args: str):
     )
     db.add(job)
     db.commit()
+
+    remaining = user.credits
     db.close()
 
     return {
         "job_id": job_id,
         "status": "queued",
-        "remaining_credits": user.credits
+        "remaining_credits": remaining
     }
 
 # ---------------- JOB STATUS ----------------
@@ -121,9 +130,8 @@ def job_status(job_id: str):
 def user_jobs(user_id: int):
     db = SessionLocal()
     jobs = db.query(Job).filter(Job.user_id == user_id).all()
-    db.close()
 
-    return [
+    result = [
         {
             "id": j.id,
             "tool": j.tool,
@@ -131,6 +139,9 @@ def user_jobs(user_id: int):
         }
         for j in jobs
     ]
+
+    db.close()
+    return result
 
 # ---------------- HEALTH ----------------
 
