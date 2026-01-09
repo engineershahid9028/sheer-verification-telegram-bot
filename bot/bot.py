@@ -1,25 +1,23 @@
 import os
 import requests
+import asyncio
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    CallbackQueryHandler,
-    MessageHandler,
-    ContextTypes,
-    filters
+    ApplicationBuilder, CommandHandler,
+    CallbackQueryHandler, MessageHandler,
+    ContextTypes, filters
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 API_URL = os.getenv("API_URL")
-BOT_USERNAME = os.getenv("BOT_USERNAME", "YourBotUsername")
 
 TOOLS_DIR = "tools/multi-tools"
 sessions = {}
 
-# ---------------- Load tools ----------------
+# ---------------- LOAD TOOLS ----------------
 
 def load_tools():
+    import os
     tools = {}
     if not os.path.exists(TOOLS_DIR):
         return tools
@@ -33,7 +31,7 @@ def load_tools():
 
 TOOLS = load_tools()
 
-# ---------------- Start menu ----------------
+# ---------------- START MENU ----------------
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     global TOOLS
@@ -42,10 +40,9 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     buttons = []
     row = []
 
-    # Tool buttons
     for key in TOOLS:
         label = key.replace("-", " ").title()
-        row.append(InlineKeyboardButton(label, callback_data=f"tool:{key}"))
+        row.append(InlineKeyboardButton(label, callback_data=key))
         if len(row) == 2:
             buttons.append(row)
             row = []
@@ -53,24 +50,9 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if row:
         buttons.append(row)
 
-    # Utility buttons
     buttons.append([
         InlineKeyboardButton("💳 Balance", callback_data="balance"),
         InlineKeyboardButton("📦 My Jobs", callback_data="jobs")
-    ])
-
-    buttons.append([
-        InlineKeyboardButton("🎁 Daily Credit", callback_data="daily"),
-        InlineKeyboardButton("🏷 Promo Code", callback_data="promo")
-    ])
-
-    buttons.append([
-        InlineKeyboardButton("👥 Referral", callback_data="ref"),
-        InlineKeyboardButton("🔁 Subscription", callback_data="sub")
-    ])
-
-    buttons.append([
-        InlineKeyboardButton("🛒 Buy Credits", callback_data="buy")
     ])
 
     await update.message.reply_text(
@@ -78,146 +60,103 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# ---------------- Button handler ----------------
+# ---------------- BUTTON HANDLER ----------------
 
 async def on_click(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-    user_id = q.from_user.id
 
-    # Tool click
-    if q.data.startswith("tool:"):
-        tool_key = q.data.split(":", 1)[1]
-        sessions[user_id] = tool_key
+    if q.data in TOOLS:
+        sessions[q.from_user.id] = q.data
         await q.message.reply_text("🔗 Send verification URL:")
         return
 
-    # Balance
     if q.data == "balance":
-        r = requests.get(f"{API_URL}/balance/{user_id}")
+        r = requests.get(f"{API_URL}/balance/{q.from_user.id}")
         await q.message.reply_text(f"💳 Balance: {r.json()['credits']} credits")
         return
 
-    # My Jobs
     if q.data == "jobs":
-        r = requests.get(f"{API_URL}/jobs/{user_id}")
+        r = requests.get(f"{API_URL}/jobs/{q.from_user.id}")
         jobs = r.json()
 
         if not jobs:
-            await q.message.reply_text("📦 You have no jobs yet.")
+            await q.message.reply_text("📦 No jobs yet.")
             return
 
-        text = "📦 Your Jobs:\n\n"
+        msg = "📦 Your Jobs:\n\n"
         for j in jobs:
-            text += f"🆔 {j['id']} — {j['status']}\n"
+            msg += f"• {j['tool']} → {j['status']}\n"
 
-        await q.message.reply_text(text)
+        await q.message.reply_text(msg)
         return
 
-    # Daily credit
-    if q.data == "daily":
-        r = requests.post(f"{API_URL}/daily/{user_id}")
-        if r.json().get("claimed"):
-            await q.message.reply_text("🎁 You received 1 free credit!")
-        else:
-            await q.message.reply_text("⏳ You already claimed today.")
-        return
-
-    # Promo code
-    if q.data == "promo":
-        sessions[user_id] = "promo"
-        await q.message.reply_text("🏷 Send promo code:")
-        return
-
-    # Referral
-    if q.data == "ref":
-        link = f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
-        await q.message.reply_text(
-            "👥 Invite friends & earn credits!\n\n"
-            f"Your referral link:\n{link}"
-        )
-        return
-
-    # Subscription
-    if q.data == "sub":
-        await q.message.reply_text(
-            "🔁 Monthly Subscription\n\n"
-            "✔ 20 credits per month\n"
-            "✔ Priority queue\n\n"
-            "Use Buy Credits to subscribe."
-        )
-        return
-
-    # Buy credits
-    if q.data == "buy":
-        kb = [
-            [InlineKeyboardButton("💳 Card (Stripe)", callback_data="pay:stripe")],
-            [InlineKeyboardButton("🟡 Binance Pay", callback_data="pay:binance")],
-            [InlineKeyboardButton("🪙 Crypto", callback_data="pay:crypto")],
-            [InlineKeyboardButton("⭐ Telegram Stars", callback_data="pay:stars")]
-        ]
-        await q.message.reply_text(
-            "🛒 Choose payment method:",
-            reply_markup=InlineKeyboardMarkup(kb)
-        )
-        return
-
-    # Payment handlers
-    if q.data.startswith("pay:"):
-        method = q.data.split(":", 1)[1]
-        await q.message.reply_text(f"💰 {method.upper()} payment coming soon.")
-        return
-
-# ---------------- Text handler ----------------
+# ---------------- URL INPUT ----------------
 
 async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
+    uid = update.message.from_user.id
 
-    # Promo input
-    if sessions.get(user_id) == "promo":
-        code = update.message.text.strip()
-        sessions.pop(user_id)
-
-        r = requests.post(f"{API_URL}/promo", params={"user_id": user_id, "code": code})
-        if r.status_code == 200:
-            await update.message.reply_text("✅ Promo code applied!")
-        else:
-            await update.message.reply_text("❌ Invalid promo code.")
+    if uid not in sessions:
         return
 
-    # Tool input
-    if user_id not in sessions:
-        return
-
-    tool_key = sessions.pop(user_id)
+    tool_key = sessions.pop(uid)
     tool = TOOLS.get(tool_key)
+
     url = update.message.text.strip()
 
     await update.message.reply_text("⏳ Job queued...")
 
     r = requests.post(
         f"{API_URL}/run",
-        params={"user_id": user_id, "tool": tool, "args": url}
+        params={"user_id": uid, "tool": tool, "args": url}
     )
 
     if r.status_code != 200:
         await update.message.reply_text(r.text)
         return
 
-    d = r.json()
-    await update.message.reply_text(
-        f"✅ Job started!\n\n"
-        f"🆔 Job ID: {d['job_id']}\n"
-        f"📌 Queue Position: {d['queue_position']}\n"
-        f"💳 Remaining Credits: {d['remaining_credits']}"
-    )
+    data = r.json()
+    job_id = data["job_id"]
 
-# ---------------- Run bot ----------------
+    # Start progress tracker
+    asyncio.create_task(track_job(update, ctx, job_id))
+
+# ---------------- PROGRESS TRACKER ----------------
+
+async def track_job(update: Update, ctx: ContextTypes.DEFAULT_TYPE, job_id: str):
+    chat_id = update.message.chat_id
+    msg = await ctx.bot.send_message(chat_id, "🔄 Processing... 0%")
+
+    while True:
+        await asyncio.sleep(3)
+
+        r = requests.get(f"{API_URL}/status/{job_id}")
+        data = r.json()
+
+        status = data["status"]
+        progress = data["progress"]
+
+        bar = "▓" * (progress // 10) + "░" * (10 - progress // 10)
+
+        await msg.edit_text(f"🔄 Processing...\n[{bar}] {progress}%")
+
+        if status == "done":
+            output = data.get("output", "Completed")
+            await msg.edit_text(f"✅ Job completed!\n\n{output[:4000]}")
+            return
+
+        if status == "failed":
+            output = data.get("output", "Failed")
+            await msg.edit_text(f"❌ Job failed\n\n{output}")
+            return
+
+# ---------------- RUN BOT ----------------
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
+
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CallbackQueryHandler(on_click))
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
 
-print("🤖 Bot running...")
+print("🤖 Bot started...")
 app.run_polling()
