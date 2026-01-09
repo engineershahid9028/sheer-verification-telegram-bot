@@ -13,22 +13,20 @@ print("✅ Worker connected to Redis")
 TOOLS_ROOT = "tools/multi-tools"
 
 while True:
+    _, raw = r.brpop("job_queue")
+    job = json.loads(raw)
+
+    job_id = job["job_id"]
+    tool = job["tool"]
+    args = job["args"]
+
+    print(f"\n▶ JOB {job_id}")
+    print(f"▶ TOOL: {tool}")
+    print(f"▶ ARGS: {args}")
+
+    r.hset(job_id, mapping={"status": "running", "progress": 30})
+
     try:
-        _, raw = r.brpop("job_queue")
-        job = json.loads(raw)
-
-        job_id = job["job_id"]
-        tool = job["tool"]
-        args = job["args"]
-
-        print(f"▶ Running job {job_id} with tool {tool}")
-        print(f"▶ Args: {args}")
-
-        r.hset(job_id, mapping={
-            "status": "running",
-            "progress": 30
-        })
-
         tool_path = f"{TOOLS_ROOT}/{tool}/main.py"
 
         if not os.path.exists(tool_path):
@@ -36,7 +34,7 @@ while True:
 
         cmd = ["python", tool_path] + shlex.split(args)
 
-        print("▶ Command:", cmd)
+        print("▶ CMD:", cmd)
 
         process = subprocess.Popen(
             cmd,
@@ -45,11 +43,7 @@ while True:
             text=True
         )
 
-        try:
-            out, err = process.communicate(timeout=180)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            raise Exception("Tool execution timed out (180s)")
+        out, err = process.communicate(timeout=180)
 
         output = ""
         if out:
@@ -58,7 +52,7 @@ while True:
             output += "\n=== STDERR ===\n" + err
 
         if process.returncode != 0:
-            print("❌ Tool failed")
+            print("❌ TOOL FAILED")
             print(output)
 
             r.hset(job_id, mapping={
@@ -67,7 +61,7 @@ while True:
                 "output": output or "Tool exited with error"
             })
         else:
-            print("✅ Tool finished successfully")
+            print("✅ TOOL SUCCESS")
 
             r.hset(job_id, mapping={
                 "status": "done",
@@ -75,15 +69,13 @@ while True:
                 "output": output or "Completed successfully"
             })
 
-    except Exception as e:
+    except Exception:
         error_text = traceback.format_exc()
-        print("🔥 Worker exception:", error_text)
+        print("🔥 WORKER ERROR")
+        print(error_text)
 
-        try:
-            r.hset(job_id, mapping={
-                "status": "failed",
-                "progress": 0,
-                "output": error_text
-            })
-        except:
-            pass
+        r.hset(job_id, mapping={
+            "status": "failed",
+            "progress": 0,
+            "output": error_text
+        })
