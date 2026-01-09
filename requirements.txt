@@ -1,5 +1,6 @@
 fastapi
 uvicorn
+pillow
 redis
 sqlalchemy
 psycopg2-binary
@@ -10,4 +11,3 @@ tls-client
 playwright
 undetected-chromedriver
 python-telegram-bot==20.7
-pillow
