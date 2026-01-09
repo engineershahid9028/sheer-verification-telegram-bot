@@ -160,3 +160,13 @@ def health():
         "backend": "running",
         "redis": r.ping()
     }
+    from backend.rewards import claim_daily
+
+@app.post("/daily/{user_id}")
+def daily(user_id: int):
+    db = SessionLocal()
+    user = get_or_create_user(user_id)
+    ok = claim_daily(user, db)
+    db.close()
+    return {"claimed": ok}
+
