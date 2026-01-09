@@ -1,3 +1,5 @@
+import sys
+sys.path.append("/app")
 import os, json, redis, subprocess
 r = redis.Redis.from_url(os.getenv("REDIS_URL"))
 
