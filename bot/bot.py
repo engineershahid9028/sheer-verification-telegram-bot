@@ -5,10 +5,19 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 BOT_TOKEN=os.getenv("BOT_TOKEN")
 API_URL=os.getenv("API_URL")
 
-TOOLS={
- "spotify":"spotify-verify-tool",
- "youtube":"youtube-verify-tool",
-}
+import os
+
+TOOLS_DIR = "tools/multi-tools"
+
+def load_tools():
+    tools = {}
+    for name in os.listdir(TOOLS_DIR):
+        path = os.path.join(TOOLS_DIR, name)
+        if os.path.isdir(path) and os.path.exists(os.path.join(path, "main.py")):
+            key = name.replace("-verify-tool", "").replace("-tool", "")
+            tools[key] = name
+    return tools
+
 
 sessions={}
 
