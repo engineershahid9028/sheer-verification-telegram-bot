@@ -125,4 +125,99 @@ async def on_click(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # Promo code
     if q.data == "promo":
-        sessions[user_id] =_]()
+        sessions[user_id] = "promo"
+        await q.message.reply_text("🏷 Send promo code:")
+        return
+
+    # Referral
+    if q.data == "ref":
+        link = f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
+        await q.message.reply_text(
+            "👥 Invite friends & earn credits!\n\n"
+            f"Your referral link:\n{link}"
+        )
+        return
+
+    # Subscription
+    if q.data == "sub":
+        await q.message.reply_text(
+            "🔁 Monthly Subscription\n\n"
+            "✔ 20 credits per month\n"
+            "✔ Priority queue\n\n"
+            "Use Buy Credits to subscribe."
+        )
+        return
+
+    # Buy credits
+    if q.data == "buy":
+        kb = [
+            [InlineKeyboardButton("💳 Card (Stripe)", callback_data="pay:stripe")],
+            [InlineKeyboardButton("🟡 Binance Pay", callback_data="pay:binance")],
+            [InlineKeyboardButton("🪙 Crypto", callback_data="pay:crypto")],
+            [InlineKeyboardButton("⭐ Telegram Stars", callback_data="pay:stars")]
+        ]
+        await q.message.reply_text(
+            "🛒 Choose payment method:",
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+        return
+
+    # Payment handlers
+    if q.data.startswith("pay:"):
+        method = q.data.split(":", 1)[1]
+        await q.message.reply_text(f"💰 {method.upper()} payment coming soon.")
+        return
+
+# ---------------- Text handler ----------------
+
+async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    user_id = update.message.from_user.id
+
+    # Promo input
+    if sessions.get(user_id) == "promo":
+        code = update.message.text.strip()
+        sessions.pop(user_id)
+
+        r = requests.post(f"{API_URL}/promo", params={"user_id": user_id, "code": code})
+        if r.status_code == 200:
+            await update.message.reply_text("✅ Promo code applied!")
+        else:
+            await update.message.reply_text("❌ Invalid promo code.")
+        return
+
+    # Tool input
+    if user_id not in sessions:
+        return
+
+    tool_key = sessions.pop(user_id)
+    tool = TOOLS.get(tool_key)
+    url = update.message.text.strip()
+
+    await update.message.reply_text("⏳ Job queued...")
+
+    r = requests.post(
+        f"{API_URL}/run",
+        params={"user_id": user_id, "tool": tool, "args": url}
+    )
+
+    if r.status_code != 200:
+        await update.message.reply_text(r.text)
+        return
+
+    d = r.json()
+    await update.message.reply_text(
+        f"✅ Job started!\n\n"
+        f"🆔 Job ID: {d['job_id']}\n"
+        f"📌 Queue Position: {d['queue_position']}\n"
+        f"💳 Remaining Credits: {d['remaining_credits']}"
+    )
+
+# ---------------- Run bot ----------------
+
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CallbackQueryHandler(on_click))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
+
+print("🤖 Bot running...")
+app.run_polling()
