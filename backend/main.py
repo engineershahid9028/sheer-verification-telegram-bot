@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException
-from database import init_db, SessionLocal, get_or_create_user
-from models import Tool, Job
-from queue import enqueue_job, get_queue_position
+from backend.database import init_db, SessionLocal, get_or_create_user
+from backend.models import Tool, Job
+from backend.queue import enqueue_job, get_queue_position
+
 
 app = FastAPI()
 
